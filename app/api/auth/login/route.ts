@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyPin, createSession, initPin } from '@/lib/auth';
+import { ensureInitialized } from '@/lib/db';
 
 export async function POST(request: Request) {
   try {
@@ -12,9 +13,10 @@ export async function POST(request: Request) {
       );
     }
 
+    await ensureInitialized();
     await initPin();
 
-    if (!verifyPin(pin)) {
+    if (!(await verifyPin(pin))) {
       return NextResponse.json(
         { ok: false, error: 'PIN incorrecto' },
         { status: 401 },

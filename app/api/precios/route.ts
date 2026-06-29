@@ -3,7 +3,7 @@ import { getPrecios, createPrecio } from '@/lib/db';
 
 export async function GET() {
   try {
-    const precios = getPrecios(true);
+    const precios = await getPrecios(true);
     return NextResponse.json(precios);
   } catch {
     return NextResponse.json(
@@ -16,7 +16,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const data = await request.json();
-    const precio = createPrecio(data);
+    const precio = await createPrecio(data);
     return NextResponse.json(precio, { status: 201 });
   } catch {
     return NextResponse.json(

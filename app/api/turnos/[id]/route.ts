@@ -7,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const turno = getTurno(parseInt(id));
+    const turno = await getTurno(parseInt(id));
 
     if (!turno) {
       return NextResponse.json(
@@ -32,7 +32,7 @@ export async function PUT(
   try {
     const { id } = await params;
     const data = await request.json();
-    updateTurno(parseInt(id), data);
+    await updateTurno(parseInt(id), data);
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json(

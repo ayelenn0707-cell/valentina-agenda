@@ -3,7 +3,7 @@ import { getClientes, createCliente } from '@/lib/db';
 
 export async function GET() {
   try {
-    const clientes = getClientes();
+    const clientes = await getClientes();
     return NextResponse.json(clientes);
   } catch {
     return NextResponse.json(
@@ -16,7 +16,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const data = await request.json();
-    const cliente = createCliente(data);
+    const cliente = await createCliente(data);
     return NextResponse.json(cliente, { status: 201 });
   } catch {
     return NextResponse.json(

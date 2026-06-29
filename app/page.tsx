@@ -1,14 +1,15 @@
 import { initPin } from "@/lib/auth";
 import { seedData } from "@/lib/seed";
 import { checkSession } from "@/lib/auth";
+import { ensureInitialized } from "@/lib/db";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  // Initialise on first launch
+  await ensureInitialized();
   await initPin();
-  seedData();
+  await seedData();
 
   const authenticated = await checkSession();
 

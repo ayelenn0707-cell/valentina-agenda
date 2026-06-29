@@ -7,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const precios = getPrecios();
+    const precios = await getPrecios();
     const precio = precios.find((p) => p.id === parseInt(id));
 
     if (!precio) {
@@ -33,7 +33,7 @@ export async function PUT(
   try {
     const { id } = await params;
     const data = await request.json();
-    updatePrecio(parseInt(id), data);
+    await updatePrecio(parseInt(id), data);
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json(
@@ -49,7 +49,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    deletePrecio(parseInt(id));
+    await deletePrecio(parseInt(id));
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json(

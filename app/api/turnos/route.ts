@@ -16,13 +16,13 @@ export async function GET(request: Request) {
 
     let turnos;
     if (fec) {
-      turnos = getTurnosPorFecha(fec);
+      turnos = await getTurnosPorFecha(fec);
     } else if (fecDesde && fecHasta) {
-      turnos = getTurnosPorRango(fecDesde, fecHasta);
+      turnos = await getTurnosPorRango(fecDesde, fecHasta);
     } else if (cid) {
-      turnos = getTurnosPorCliente(parseInt(cid));
+      turnos = await getTurnosPorCliente(parseInt(cid));
     } else {
-      turnos = getTurnosPorFecha();
+      turnos = await getTurnosPorFecha();
     }
 
     return NextResponse.json(turnos);
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const data = await request.json();
-    const turno = createTurno(data);
+    const turno = await createTurno(data);
     return NextResponse.json(turno, { status: 201 });
   } catch {
     return NextResponse.json(

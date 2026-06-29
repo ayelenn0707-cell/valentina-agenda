@@ -7,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const cliente = getCliente(parseInt(id));
+    const cliente = await getCliente(parseInt(id));
 
     if (!cliente) {
       return NextResponse.json(
@@ -32,7 +32,7 @@ export async function PUT(
   try {
     const { id } = await params;
     const data = await request.json();
-    updateCliente(parseInt(id), data);
+    await updateCliente(parseInt(id), data);
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json(

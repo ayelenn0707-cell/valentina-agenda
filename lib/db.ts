@@ -1,16 +1,28 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-import type { Client, Turno, Precio } from './types';
+import { createClient } from "@libsql/client";
+import type { Client, Turno, Precio } from "./types";
 
-// ---------------------------------------------------------------------------
-// Singleton connection
-// ---------------------------------------------------------------------------
+let turso: ReturnType<typeof createClient> | null = null;
 
-let db: Database.Database | null = null;
+export function getDB() {
+  if (!turso) {
+    const url =
+      process.env.TURSO_DB_URL ??
+      `file:${process.env.DB_PATH ?? "./data.db"}`;
+    const authToken = process.env.TURSO_AUTH_TOKEN;
+    turso = createClient({ url, ...(authToken ? { authToken } : {}) });
+  }
+  return turso;
+}
 
-function initSchema(database: Database.Database): void {
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS clientes (
+async function ensureSchema() {
+  const db = getDB();
+  const tables = await db.execute(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='clientes'"
+  );
+  if (tables.rows.length > 0) return;
+
+  await db.execute(
+    `CREATE TABLE clientes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nombre TEXT NOT NULL DEFAULT '',
       wpp TEXT NOT NULL DEFAULT '',
@@ -27,9 +39,10 @@ function initSchema(database: Database.Database): void {
       fav INTEGER NOT NULL DEFAULT 0,
       nueva INTEGER NOT NULL DEFAULT 0,
       cancel INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS turnos (
+    )`
+  );
+  await db.execute(
+    `CREATE TABLE turnos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       cid INTEGER NOT NULL,
       fec TEXT NOT NULL,
@@ -44,151 +57,172 @@ function initSchema(database: Database.Database): void {
       notas TEXT NOT NULL DEFAULT '',
       mot TEXT NOT NULL DEFAULT '',
       FOREIGN KEY (cid) REFERENCES clientes(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS precios (
+    )`
+  );
+  await db.execute(
+    `CREATE TABLE precios (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       serv TEXT NOT NULL DEFAULT '',
       pre INTEGER NOT NULL DEFAULT 0,
       act INTEGER NOT NULL DEFAULT 1
-    );
-
-    CREATE TABLE IF NOT EXISTS config (
+    )`
+  );
+  await db.execute(
+    `CREATE TABLE config (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
-    );
-  `);
-}
-
-export function getDB(): Database.Database {
-  if (!db) {
-    const dbPath = process.env.DB_PATH || path.join(process.cwd(), 'data.db');
-    db = new Database(dbPath);
-    db.pragma('journal_mode = WAL');
-    initSchema(db);
-  }
-  return db;
-}
-
-// ---------------------------------------------------------------------------
-// Clientes
-// ---------------------------------------------------------------------------
-
-export function getClientes(): Client[] {
-  return getDB().prepare('SELECT * FROM clientes ORDER BY nombre').all() as Client[];
-}
-
-export function getCliente(id: number): Client | undefined {
-  return getDB().prepare('SELECT * FROM clientes WHERE id = ?').get(id) as Client | undefined;
-}
-
-export function createCliente(data: Omit<Client, 'id' | 'cancel'>): Client {
-  const stmt = getDB().prepare(
-    `INSERT INTO clientes (nombre, wpp, edad, dir, ig, alerg, emb, cond, forma, largo, servHab, notas, fav, nueva)
-     VALUES (@nombre, @wpp, @edad, @dir, @ig, @alerg, @emb, @cond, @forma, @largo, @servHab, @notas, @fav, @nueva)`,
+    )`
   );
-  const result = stmt.run(data);
-  return getCliente(result.lastInsertRowid as number)!;
 }
 
-export function updateCliente(id: number, data: Partial<Client>): void {
+function rowToClient(row: any): Client {
+  return { ...row } as Client;
+}
+function rowToTurno(row: any): Turno {
+  return { ...row } as Turno;
+}
+function rowToPrecio(row: any): Precio {
+  return { ...row } as Precio;
+}
+
+// ---- Clientes ----
+
+export async function getClientes(): Promise<Client[]> {
+  const res = await getDB().execute("SELECT * FROM clientes ORDER BY nombre");
+  return res.rows.map(rowToClient);
+}
+
+export async function getCliente(id: number): Promise<Client | undefined> {
+  const res = await getDB().execute({ sql: "SELECT * FROM clientes WHERE id = ?", args: [id] });
+  return res.rows[0] ? rowToClient(res.rows[0]) : undefined;
+}
+
+export async function createCliente(data: Omit<Client, "id" | "cancel">): Promise<Client> {
+  const res = await getDB().execute({
+    sql: `INSERT INTO clientes (nombre, wpp, edad, dir, ig, alerg, emb, cond, forma, largo, servHab, notas, fav, nueva)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [data.nombre, data.wpp, data.edad, data.dir, data.ig, data.alerg, data.emb, data.cond, data.forma, data.largo, data.servHab, data.notas, data.fav, data.nueva],
+  });
+  return (await getCliente(Number(res.lastInsertRowid)))!;
+}
+
+export async function updateCliente(id: number, data: Partial<Client>): Promise<void> {
   const keys = Object.keys(data) as (keyof Client)[];
   if (keys.length === 0) return;
-  const setClause = keys.map((k) => `${k} = ?`).join(', ');
+  const setClause = keys.map((k) => `${k} = ?`).join(", ");
   const values = keys.map((k) => data[k]);
-  getDB()
-    .prepare(`UPDATE clientes SET ${setClause} WHERE id = ?`)
-    .run(...values, id);
+  await getDB().execute({
+    sql: `UPDATE clientes SET ${setClause} WHERE id = ?`,
+    args: [...values, id],
+  });
 }
 
-// ---------------------------------------------------------------------------
-// Turnos
-// ---------------------------------------------------------------------------
+// ---- Turnos ----
 
-export function getTurnosPorFecha(fec?: string): Turno[] {
+export async function getTurnosPorFecha(fec?: string): Promise<Turno[]> {
   const date = fec ?? new Date().toISOString().slice(0, 10);
-  return getDB().prepare('SELECT * FROM turnos WHERE fec = ? ORDER BY hor').all(date) as Turno[];
+  const res = await getDB().execute({ sql: "SELECT * FROM turnos WHERE fec = ? ORDER BY hor", args: [date] });
+  return res.rows.map(rowToTurno);
 }
 
-export function getTurnosPorRango(fecDesde: string, fecHasta: string): Turno[] {
-  return getDB()
-    .prepare('SELECT * FROM turnos WHERE fec BETWEEN ? AND ? ORDER BY fec, hor')
-    .all(fecDesde, fecHasta) as Turno[];
+export async function getTurnosPorRango(fecDesde: string, fecHasta: string): Promise<Turno[]> {
+  const res = await getDB().execute({
+    sql: "SELECT * FROM turnos WHERE fec BETWEEN ? AND ? ORDER BY fec, hor",
+    args: [fecDesde, fecHasta],
+  });
+  return res.rows.map(rowToTurno);
 }
 
-export function getTurnosPorCliente(cid: number): Turno[] {
-  return getDB()
-    .prepare('SELECT * FROM turnos WHERE cid = ? ORDER BY fec DESC, hor DESC')
-    .all(cid) as Turno[];
+export async function getTurnosPorCliente(cid: number): Promise<Turno[]> {
+  const res = await getDB().execute({
+    sql: "SELECT * FROM turnos WHERE cid = ? ORDER BY fec DESC, hor DESC",
+    args: [cid],
+  });
+  return res.rows.map(rowToTurno);
 }
 
-export function getTurno(id: number): Turno | undefined {
-  return getDB().prepare('SELECT * FROM turnos WHERE id = ?').get(id) as Turno | undefined;
+export async function getTurno(id: number): Promise<Turno | undefined> {
+  const res = await getDB().execute({ sql: "SELECT * FROM turnos WHERE id = ?", args: [id] });
+  return res.rows[0] ? rowToTurno(res.rows[0]) : undefined;
 }
 
-export function createTurno(data: Omit<Turno, 'id'>): Turno {
-  const stmt = getDB().prepare(
-    `INSERT INTO turnos (cid, fec, hor, serv, reconst, remoc, tot, met, pg, est, notas, mot)
-     VALUES (@cid, @fec, @hor, @serv, @reconst, @remoc, @tot, @met, @pg, @est, @notas, @mot)`,
-  );
-  const result = stmt.run(data);
-  return getTurno(result.lastInsertRowid as number)!;
+export async function createTurno(data: Omit<Turno, "id">): Promise<Turno> {
+  const res = await getDB().execute({
+    sql: `INSERT INTO turnos (cid, fec, hor, serv, reconst, remoc, tot, met, pg, est, notas, mot)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [data.cid, data.fec, data.hor, data.serv, data.reconst, data.remoc, data.tot, data.met, data.pg, data.est, data.notas, data.mot],
+  });
+  return (await getTurno(Number(res.lastInsertRowid)))!;
 }
 
-export function updateTurno(id: number, data: Partial<Turno>): void {
+export async function updateTurno(id: number, data: Partial<Turno>): Promise<void> {
   const keys = Object.keys(data) as (keyof Turno)[];
   if (keys.length === 0) return;
-  const setClause = keys.map((k) => `${k} = ?`).join(', ');
+  const setClause = keys.map((k) => `${k} = ?`).join(", ");
   const values = keys.map((k) => data[k]);
-  getDB()
-    .prepare(`UPDATE turnos SET ${setClause} WHERE id = ?`)
-    .run(...values, id);
+  await getDB().execute({
+    sql: `UPDATE turnos SET ${setClause} WHERE id = ?`,
+    args: [...values, id],
+  });
 }
 
-// ---------------------------------------------------------------------------
-// Precios
-// ---------------------------------------------------------------------------
+// ---- Precios ----
 
-export function getPrecios(onlyActive?: boolean): Precio[] {
-  if (onlyActive) {
-    return getDB().prepare('SELECT * FROM precios WHERE act = 1 ORDER BY serv').all() as Precio[];
-  }
-  return getDB().prepare('SELECT * FROM precios ORDER BY serv').all() as Precio[];
+export async function getPrecios(onlyActive?: boolean): Promise<Precio[]> {
+  const sql = onlyActive
+    ? "SELECT * FROM precios WHERE act = 1 ORDER BY serv"
+    : "SELECT * FROM precios ORDER BY serv";
+  const res = await getDB().execute(sql);
+  return res.rows.map(rowToPrecio);
 }
 
-export function createPrecio(data: Omit<Precio, 'id'>): Precio {
-  const stmt = getDB().prepare('INSERT INTO precios (serv, pre, act) VALUES (@serv, @pre, @act)');
-  const result = stmt.run(data);
-  return getDB()
-    .prepare('SELECT * FROM precios WHERE id = ?')
-    .get(result.lastInsertRowid as number) as Precio;
+export async function createPrecio(data: Omit<Precio, "id">): Promise<Precio> {
+  const res = await getDB().execute({
+    sql: "INSERT INTO precios (serv, pre, act) VALUES (?, ?, ?)",
+    args: [data.serv, data.pre, data.act],
+  });
+  const r2 = await getDB().execute({
+    sql: "SELECT * FROM precios WHERE id = ?",
+    args: [Number(res.lastInsertRowid)],
+  });
+  return rowToPrecio(r2.rows[0]);
 }
 
-export function updatePrecio(id: number, data: Partial<Precio>): void {
+export async function updatePrecio(id: number, data: Partial<Precio>): Promise<void> {
   const keys = Object.keys(data) as (keyof Precio)[];
   if (keys.length === 0) return;
-  const setClause = keys.map((k) => `${k} = ?`).join(', ');
+  const setClause = keys.map((k) => `${k} = ?`).join(", ");
   const values = keys.map((k) => data[k]);
-  getDB()
-    .prepare(`UPDATE precios SET ${setClause} WHERE id = ?`)
-    .run(...values, id);
+  await getDB().execute({
+    sql: `UPDATE precios SET ${setClause} WHERE id = ?`,
+    args: [...values, id],
+  });
 }
 
-export function deletePrecio(id: number): void {
-  getDB().prepare('DELETE FROM precios WHERE id = ?').run(id);
+export async function deletePrecio(id: number): Promise<void> {
+  await getDB().execute({ sql: "DELETE FROM precios WHERE id = ?", args: [id] });
 }
 
-// ---------------------------------------------------------------------------
-// Config (key‑value store)
-// ---------------------------------------------------------------------------
+// ---- Config ----
 
-export function getConfig(key: string): string | undefined {
-  const row = getDB()
-    .prepare('SELECT value FROM config WHERE key = ?')
-    .get(key) as { value: string } | undefined;
-  return row?.value;
+export async function getConfig(key: string): Promise<string | undefined> {
+  const res = await getDB().execute({ sql: "SELECT value FROM config WHERE key = ?", args: [key] });
+  return res.rows[0]?.value as string | undefined;
 }
 
-export function setConfig(key: string, value: string): void {
-  getDB().prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, value);
+export async function setConfig(key: string, value: string): Promise<void> {
+  await getDB().execute({
+    sql: "INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)",
+    args: [key, value],
+  });
+}
+
+// ---- Init ----
+
+let schemaEnsured = false;
+
+export async function ensureInitialized(): Promise<void> {
+  if (schemaEnsured) return;
+  await ensureSchema();
+  schemaEnsured = true;
 }
